@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/raw/*.csv
+data/raw/*.pdf
+data/processed/*.npy
+data/processed/*.pkl
+data/processed/*.csv
+data/processed/*.gpickle
+data/external/
+
+# Models
+models/*.pkl
+
+# Reports
+reports/figures/*.png
+reports/figures/*.jpg
+reports/tables/*.csv
+reports/results/*.csv
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archive
+archive/
+archive.zip
+archive_extracted/
+
+# Environment
+.env
+.env.local
+
+# Streamlit
+.streamlit/secrets.toml
