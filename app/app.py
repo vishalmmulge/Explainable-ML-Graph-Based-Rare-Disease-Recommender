@@ -224,7 +224,7 @@ def show_recommendation_page(model, scaler, label_encoder, vocab, symptom_featur
                 for r in recommendations
             ])
             
-            st.dataframe(results_df, use_container_width=True)
+st.dataframe(results_df, use_container_width=True, width='stretch')
             
             # Bar chart
             fig = go.Figure()
