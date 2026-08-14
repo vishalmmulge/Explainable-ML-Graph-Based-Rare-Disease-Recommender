@@ -1,4 +1,4 @@
-"""Model training with XGBoost."""
+"""Hierarchical Model Training - Stage 1: Group/Type, Stage 2: Disease within Group+Type."""
 
 import numpy as np
 import pandas as pd
@@ -12,13 +12,39 @@ from src.config import *
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import top_k_accuracy_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from scipy.special import softmax
 import xgboost as xgb
 
 
+class HierarchicalModelWrapper:
+    """Wrapper for hierarchical model that can be pickled."""
+    
+    def __init__(self, group_model, type_model, disease_models, 
+                 group_le, type_le, disease_le, scaler_group, scaler_type):
+        self.group_model = group_model
+        self.type_model = type_model
+        self.disease_models = disease_models
+        self.group_le = group_le
+        self.type_le = type_le
+        self.disease_le = disease_le
+        self.scaler_group = scaler_group
+        self.scaler_type = scaler_type
+    
+    def predict_proba(self, X):
+        return hierarchical_predict(
+            self.group_model, self.type_model, self.disease_models,
+            X, self.group_le, self.type_le, None, self.disease_le,
+            self.scaler_group, self.scaler_type, self.scaler_group
+        )[0]
+    
+    @property
+    def classes_(self):
+        return self.disease_le.classes_
+
+
 def load_processed_data():
-    """Load processed data."""
+    """Load processed data with hierarchical labels."""
     print("Loading processed data...")
     X = np.load(PROCESSED_DATA_DIR / "X.npy")
     y = np.load(PROCESSED_DATA_DIR / "y.npy")
@@ -34,19 +60,34 @@ def load_processed_data():
     
     merged = pd.read_csv(PROCESSED_DISEASES_FILE)
     
-    print(f"  X shape: {X.shape}")
-    print(f"  y shape: {y.shape}")
-    print(f"  Classes: {len(label_encoder.classes_)}")
+    # Create hierarchical labels
+    group_le = LabelEncoder()
+    type_le = LabelEncoder()
     
-    return X, y, label_encoder, vocab, symptom_features, merged
+    y_group = group_le.fit_transform(merged['DisorderGroup'].values)
+    y_type = type_le.fit_transform(merged['DisorderType'].values)
+    
+    # Combined group+type label
+    y_group_type = np.array([f"{g}_{t}" for g, t in zip(y_group, y_type)])
+    group_type_le = LabelEncoder()
+    y_group_type_encoded = group_type_le.fit_transform(y_group_type)
+    
+    print(f"  X shape: {X.shape}")
+    print(f"  y (disease) shape: {y.shape}")
+    print(f"  y_group classes: {len(group_le.classes_)} - {group_le.classes_}")
+    print(f"  y_type classes: {len(type_le.classes_)} - {type_le.classes_}")
+    print(f"  y_group_type classes: {len(group_type_le.classes_)}")
+    
+    return X, y, label_encoder, vocab, symptom_features, merged, \
+           y_group, group_le, y_type, type_le, y_group_type_encoded, group_type_le
 
 
-def create_augmented_data(X, y, n_augment=3, noise_level=0.05):
-    """Create augmented training data."""
+def create_augmented_data(X, y_dict, n_augment=3, noise_level=0.05):
+    """Create augmented training data for all label types."""
     print(f"Creating augmented data (n_augment={n_augment})...")
     
     X_aug = [X]
-    y_aug = [y]
+    y_aug_dict = {k: [v] for k, v in y_dict.items()}
     
     for i in range(n_augment):
         X_noisy = X.copy()
@@ -63,19 +104,20 @@ def create_augmented_data(X, y, n_augment=3, noise_level=0.05):
                 X_noisy[:, j] = np.clip(X_noisy[:, j] + noise, 0, None)
         
         X_aug.append(X_noisy)
-        y_aug.append(y)
+        for k in y_dict:
+            y_aug_dict[k].append(y_dict[k])
     
     X_aug = np.vstack(X_aug)
-    y_aug = np.hstack(y_aug)
+    y_aug_dict = {k: np.hstack(v) for k, v in y_aug_dict.items()}
     print(f"  Augmented shape: {X_aug.shape}")
-    return X_aug, y_aug
+    return X_aug, y_aug_dict
 
 
-def train_test_split_samples(X, y, test_size=0.2, val_size=0.1, random_state=42):
-    """Simple random split."""
+def train_test_split_samples(X, y_dict, test_size=0.2, val_size=0.1, random_state=42):
+    """Simple random split with same indices for all labels."""
     print("Splitting samples (random)...")
     
-    n = len(y)
+    n = len(list(y_dict.values())[0])
     indices = np.arange(n)
     np.random.seed(random_state)
     np.random.shuffle(indices)
@@ -96,26 +138,62 @@ def train_test_split_samples(X, y, test_size=0.2, val_size=0.1, random_state=42)
     test_mask[test_idx] = True
     
     print(f"Train samples: {train_mask.sum()}, Val: {val_mask.sum()}, Test: {test_mask.sum()}")
-    print(f"Unique diseases in train: {len(np.unique(y[train_mask]))}")
-    print(f"Unique diseases in val: {len(np.unique(y[val_mask]))}")
-    print(f"Unique diseases in test: {len(np.unique(y[test_mask]))}")
+    for k, v in y_dict.items():
+        print(f"  {k} unique in train: {len(np.unique(v[train_mask]))}")
     
     return train_mask, val_mask, test_mask
+
+
+def train_xgboost(X_train, y_train, X_val=None, y_val=None, model_name="model"):
+    """Train XGBoost model with label remapping."""
+    print(f"Training XGBoost ({model_name})...")
+    
+    scaler = StandardScaler(with_mean=False)
+    X_train_scaled = scaler.fit_transform(X_train)
+    
+    unique_labels = np.unique(y_train)
+    label_map = {label: idx for idx, label in enumerate(unique_labels)}
+    y_train_mapped = np.array([label_map[label] for label in y_train])
+    
+    eval_set = None
+    if X_val is not None and y_val is not None:
+        X_val_scaled = scaler.transform(X_val)
+        y_val_mapped = np.array([label_map.get(label, -1) for label in y_val])
+        valid_mask = y_val_mapped >= 0
+        if valid_mask.any():
+            eval_set = [(X_val_scaled[valid_mask], y_val_mapped[valid_mask])]
+    
+    n_classes = len(unique_labels)
+    model = xgb.XGBClassifier(
+        n_estimators=100 if n_classes > 20 else 50,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective='multi:softprob',
+        num_class=n_classes,
+        random_state=RANDOM_STATE,
+        n_jobs=-1,
+        eval_metric='mlogloss',
+        tree_method='hist',
+        enable_categorical=False,
+        early_stopping_rounds=10
+    )
+    
+    model.fit(X_train_scaled, y_train_mapped, eval_set=eval_set, verbose=False)
+    
+    model.label_map_ = label_map
+    model.inv_label_map_ = {v: k for k, v in label_map.items()}
+    
+    return model, scaler
 
 
 def evaluate_model(model, X_test, y_test, label_encoder, k_values=[1, 3, 5]):
     """Evaluate model with top-k accuracy."""
     print("Evaluating model...")
     
-    if hasattr(model, 'predict_proba'):
-        y_proba = model.predict_proba(X_test)
-    else:
-        y_proba = model.predict(X_test)
-        if y_proba.ndim == 1:
-            y_proba = y_proba.reshape(-1, 1)
-        y_proba = softmax(y_proba, axis=1)
+    y_proba = model.predict_proba(X_test)
     
-    # Handle XGBoost label mapping
     if hasattr(model, 'inv_label_map_'):
         inv_label_map = model.inv_label_map_
         model_classes = np.array([inv_label_map[i] for i in range(len(inv_label_map))])
@@ -164,51 +242,6 @@ def evaluate_model(model, X_test, y_test, label_encoder, k_values=[1, 3, 5]):
     return results, y_proba
 
 
-def train_xgboost(X_train, y_train, X_val=None, y_val=None, num_classes=None):
-    """Train XGBoost model."""
-    print("Training XGBoost...")
-    
-    scaler = StandardScaler(with_mean=False)
-    X_train_scaled = scaler.fit_transform(X_train)
-    
-    # Remap labels to contiguous 0...n_classes-1 for XGBoost
-    unique_labels = np.unique(y_train)
-    label_map = {label: idx for idx, label in enumerate(unique_labels)}
-    y_train_mapped = np.array([label_map[label] for label in y_train])
-    
-    eval_set = None
-    if X_val is not None and y_val is not None:
-        X_val_scaled = scaler.transform(X_val)
-        y_val_mapped = np.array([label_map.get(label, -1) for label in y_val])
-        valid_mask = y_val_mapped >= 0
-        if valid_mask.any():
-            eval_set = [(X_val_scaled[valid_mask], y_val_mapped[valid_mask])]
-    
-    model = xgb.XGBClassifier(
-        n_estimators=50,
-        max_depth=6,
-        learning_rate=0.1,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        objective='multi:softprob',
-        num_class=len(unique_labels),
-        random_state=RANDOM_STATE,
-        n_jobs=-1,
-        eval_metric='mlogloss',
-        tree_method='hist',
-        enable_categorical=False,
-        early_stopping_rounds=5
-    )
-    
-    model.fit(X_train_scaled, y_train_mapped, eval_set=eval_set, verbose=False)
-    
-    # Store label mapping for prediction
-    model.label_map_ = label_map
-    model.inv_label_map_ = {v: k for k, v in label_map.items()}
-    
-    return model, scaler
-
-
 def save_model(model, scaler, label_encoder, model_name):
     """Save trained model."""
     model_path = MODEL_DIR / f"{model_name}.pkl"
@@ -220,39 +253,260 @@ def save_model(model, scaler, label_encoder, model_name):
     print(f"  Saved model to {model_path}")
 
 
+def hierarchical_predict(group_model, type_model, disease_models, 
+                         X, group_le, type_le, group_type_le, disease_le,
+                         scaler_group, scaler_type, scaler_disease):
+    """
+    Hierarchical prediction:
+    1. Predict group
+    2. Predict type
+    3. Use group+type to select disease model
+    """
+    X_group_scaled = scaler_group.transform(X)
+    X_type_scaled = scaler_type.transform(X)
+    
+    group_proba = group_model.predict_proba(X_group_scaled)
+    type_proba = type_model.predict_proba(X_type_scaled)
+    
+    group_preds = np.argmax(group_proba, axis=1)
+    type_preds = np.argmax(type_proba, axis=1)
+    
+    group_labels = [group_le.inverse_transform([g])[0] for g in group_preds]
+    type_labels = [type_le.inverse_transform([t])[0] for t in type_preds]
+    
+    # For each sample, get disease predictions from appropriate model
+    n_samples = X.shape[0]
+    disease_proba_full = np.zeros((n_samples, len(disease_le.classes_)))
+    
+    for i in range(n_samples):
+        gt_key = f"{group_labels[i]}_{type_labels[i]}"
+        if gt_key in disease_models:
+            model, scaler, gt_disease_le = disease_models[gt_key]
+            X_scaled = scaler.transform(X[i:i+1])
+            proba = model.predict_proba(X_scaled)[0]
+            
+            # Map back to global disease indices using per-group-type label encoder
+            model_classes = [model.inv_label_map_[j] for j in range(len(model.inv_label_map_))]
+            for j, cls in enumerate(model_classes):
+                # cls is the local class index, map to global via gt_disease_le
+                global_disease = gt_disease_le.inverse_transform([cls])[0]
+                if global_disease in disease_le.classes_:
+                    global_idx = np.where(disease_le.classes_ == global_disease)[0][0]
+                    disease_proba_full[i, global_idx] = proba[j]
+    
+    return disease_proba_full, group_proba, type_proba
+
+
 def main():
     print("="*60)
-    print("XGBOOST MODEL TRAINING")
+    print("HIERARCHICAL XGBOOST MODEL TRAINING")
     print("="*60)
     
-    X, y, label_encoder, vocab, symptom_features, merged = load_processed_data()
+    # Load data
+    X, y, disease_le, vocab, symptom_features, merged, \
+    y_group, group_le, y_type, type_le, y_group_type, group_type_le = load_processed_data()
     
-    X_aug, y_aug = create_augmented_data(X, y, n_augment=3, noise_level=0.05)
+    # Prepare label dictionaries
+    y_dict = {
+        'disease': y,
+        'group': y_group,
+        'type': y_type,
+        'group_type': y_group_type
+    }
     
+    # Augment
+    X_aug, y_aug_dict = create_augmented_data(X, y_dict, n_augment=3, noise_level=0.05)
+    
+    # Split
     train_mask, val_mask, test_mask = train_test_split_samples(
-        X_aug, y_aug, test_size=TEST_SIZE, val_size=VAL_SIZE, random_state=RANDOM_STATE
+        X_aug, y_aug_dict, test_size=TEST_SIZE, val_size=VAL_SIZE, random_state=RANDOM_STATE
     )
     
-    X_train, y_train = X_aug[train_mask], y_aug[train_mask]
-    X_val, y_val = X_aug[val_mask], y_aug[val_mask]
-    X_test, y_test = X_aug[test_mask], y_aug[test_mask]
+    X_train, X_val, X_test = X_aug[train_mask], X_aug[val_mask], X_aug[test_mask]
     
-    num_classes = len(label_encoder.classes_)
     print(f"\nTrain: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
-    print(f"Number of classes: {num_classes}")
     
-    model, scaler = train_xgboost(X_train, y_train, X_val, y_val)
-    results, _ = evaluate_model(model, X_test, y_test, label_encoder)
-    save_model(model, scaler, label_encoder, 'xgboost')
-    save_model(model, scaler, label_encoder, 'best_model')
+    # ========== STAGE 1: Group Classifier ==========
+    print("\n" + "="*50)
+    print("STAGE 1: DISORDER GROUP CLASSIFIER (3 classes)")
+    print("="*50)
+    group_model, scaler_group = train_xgboost(
+        X_train, y_aug_dict['group'][train_mask],
+        X_val, y_aug_dict['group'][val_mask],
+        "group_classifier"
+    )
+    group_results, _ = evaluate_model(group_model, X_test, y_aug_dict['group'][test_mask], group_le)
+    save_model(group_model, scaler_group, group_le, 'group_classifier')
     
-    results_df = pd.DataFrame([results])
+    # ========== STAGE 1: Type Classifier ==========
+    print("\n" + "="*50)
+    print("STAGE 1: DISORDER TYPE CLASSIFIER (11 classes)")
+    print("="*50)
+    type_model, scaler_type = train_xgboost(
+        X_train, y_aug_dict['type'][train_mask],
+        X_val, y_aug_dict['type'][val_mask],
+        "type_classifier"
+    )
+    type_results, _ = evaluate_model(type_model, X_test, y_aug_dict['type'][test_mask], type_le)
+    save_model(type_model, scaler_type, type_le, 'type_classifier')
+    
+    # ========== STAGE 2: Disease Classifiers per Group+Type ==========
+    print("\n" + "="*50)
+    print("STAGE 2: DISEASE CLASSIFIERS PER GROUP+TYPE")
+    print("="*50)
+    
+    disease_models = {}
+    disease_results = {}
+    
+    # Get unique group+type combinations in training data
+    gt_combinations = np.unique(y_aug_dict['group_type'][train_mask])
+    print(f"Found {len(gt_combinations)} group+type combinations")
+    
+    for gt_encoded in gt_combinations:
+        gt_label = group_type_le.inverse_transform([gt_encoded])[0]
+        group_idx, type_idx = map(int, gt_label.split('_'))
+        group_name = group_le.inverse_transform([group_idx])[0]
+        type_name = type_le.inverse_transform([type_idx])[0]
+        
+        # Get disease labels for this group+type
+        mask_train = (y_aug_dict['group_type'][train_mask] == gt_encoded)
+        mask_val = (y_aug_dict['group_type'][val_mask] == gt_encoded)
+        mask_test = (y_aug_dict['group_type'][test_mask] == gt_encoded)
+        
+        n_train = mask_train.sum()
+        n_val = mask_val.sum()
+        n_test = mask_test.sum()
+        
+        if n_train < 10:
+            print(f"  Skipping {group_name}/{type_name}: only {n_train} train samples")
+            continue
+        
+        y_disease_train = y_aug_dict['disease'][train_mask][mask_train]
+        y_disease_val = y_aug_dict['disease'][val_mask][mask_val]
+        y_disease_test = y_aug_dict['disease'][test_mask][mask_test]
+        
+        # Fit label encoder on ALL data for this group+type (train+val+test)
+        all_diseases = np.concatenate([y_disease_train, y_disease_val, y_disease_test])
+        unique_diseases = np.unique(all_diseases)
+        print(f"  {group_name}/{type_name}: {len(unique_diseases)} diseases, "
+              f"train={n_train}, val={n_val}, test={n_test}")
+        
+        if len(unique_diseases) < 2:
+            print(f"    Only 1 disease class, skipping")
+            continue
+        
+        # Train disease model for this group+type
+        X_train_gt = X_train[mask_train]
+        X_val_gt = X_val[mask_val]
+        
+        # Create per-group-type label encoder
+        gt_disease_le = LabelEncoder()
+        gt_disease_le.fit(unique_diseases)
+        
+        # Remap labels for training
+        y_train_mapped = gt_disease_le.transform(y_disease_train)
+        y_val_mapped = gt_disease_le.transform(y_disease_val)
+        y_test_mapped = gt_disease_le.transform(y_disease_test)
+        
+        try:
+            model, scaler = train_xgboost(
+                X_train_gt, y_train_mapped,
+                X_val_gt, y_val_mapped,
+                f"disease_{group_name}_{type_name}"
+            )
+            
+            # Evaluate with per-group-type label encoder
+            results, _ = evaluate_model(model, X_test[mask_test], y_test_mapped, gt_disease_le)
+            disease_results[f"{group_name}_{type_name}"] = results
+            
+            # Save model with per-group-type label encoder
+            save_model(model, scaler, gt_disease_le, f'disease_{group_name}_{type_name}')
+            
+            disease_models[gt_label] = (model, scaler, gt_disease_le)
+        except Exception as e:
+            print(f"    ERROR training {group_name}/{type_name}: {e}")
+            continue
+    
+    # ========== HIERARCHICAL EVALUATION ==========
+    print("\n" + "="*50)
+    print("HIERARCHICAL EVALUATION (Full Pipeline)")
+    print("="*50)
+    
+    # Build group+type predictions
+    gt_proba, group_proba, type_proba = hierarchical_predict(
+        group_model, type_model, disease_models,
+        X_test, group_le, type_le, group_type_le, disease_le,
+        scaler_group, scaler_type, scaler_group
+    )
+    
+    # Evaluate hierarchical predictions
+    y_test_disease = y_aug_dict['disease'][test_mask]
+    
+    class HierarchicalModel:
+        def __init__(self, gt_proba, disease_le):
+            self.gt_proba = gt_proba
+            self.classes_ = disease_le.classes_
+        def predict_proba(self, X):
+            return self.gt_proba
+    
+    eval_results, _ = evaluate_model(
+        HierarchicalModel(gt_proba, disease_le),
+        X_test, y_test_disease, disease_le
+    )
+    
+    # Save combined results
+    all_results = {
+        'group': group_results,
+        'type': type_results,
+        'hierarchical': eval_results,
+        'disease_models': {k: v for k, v in disease_results.items()}
+    }
+    
+    results_df = pd.DataFrame([{
+        'group_top1': group_results.get('top_1_accuracy', 0),
+        'group_top3': group_results.get('top_3_accuracy', 0),
+        'group_top5': group_results.get('top_5_accuracy', 0),
+        'type_top1': type_results.get('top_1_accuracy', 0),
+        'type_top3': type_results.get('top_3_accuracy', 0),
+        'type_top5': type_results.get('top_5_accuracy', 0),
+        'hierarchical_top1': eval_results.get('top_1_accuracy', 0),
+        'hierarchical_top3': eval_results.get('top_3_accuracy', 0),
+        'hierarchical_top5': eval_results.get('top_5_accuracy', 0),
+        'n_disease_models': len(disease_models)
+    }])
     results_df.to_csv(RESULTS_DIR / "model_comparison.csv")
     print(f"\nResults saved to {RESULTS_DIR / 'model_comparison.csv'}")
     print(results_df.to_string())
     
+    # Save best hierarchical model bundle
+    joblib.dump({
+        'group_model': group_model,
+        'type_model': type_model,
+        'disease_models': disease_models,
+        'scaler_group': scaler_group,
+        'scaler_type': scaler_type,
+        'group_le': group_le,
+        'type_le': type_le,
+        'disease_le': disease_le,
+        'group_type_le': group_type_le
+    }, MODEL_DIR / 'hierarchical_model.pkl')
+    
+    # Also save as best_model for compatibility
+    joblib.dump({
+        'model': type('HierarchicalModel', (), {
+            'predict_proba': lambda self, X: hierarchical_predict(
+                group_model, type_model, disease_models,
+                X, group_le, type_le, group_type_le, disease_le,
+                scaler_group, scaler_type, scaler_group
+            )[0],
+            'classes_': disease_le.classes_
+        })(),
+        'scaler': scaler_group,  # Use group scaler as default
+        'label_encoder': disease_le
+    }, MODEL_DIR / 'best_model.pkl')
+    
     print("="*60)
-    print("MODEL TRAINING COMPLETE")
+    print("HIERARCHICAL MODEL TRAINING COMPLETE")
     print("="*60)
 
 

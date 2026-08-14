@@ -42,16 +42,16 @@ def extract_disease_info(primekg):
 
 
 def extract_disease_gene_edges(primekg):
-    """Extract disease-gene associations from PrimeKG."""
+    """Extract disease-gene/protein associations from PrimeKG."""
     if primekg is None:
         return None
     
-    # disease -> gene edges
-    dg = primekg[(primekg['x_type'] == 'disease') & (primekg['y_type'] == 'gene') |
-                 (primekg['y_type'] == 'disease') & (primekg['x_type'] == 'gene')]
+    # disease -> gene/protein edges (PrimeKG uses 'gene/protein')
+    dg = primekg[(primekg['x_type'] == 'disease') & (primekg['y_type'] == 'gene/protein') |
+                 (primekg['y_type'] == 'disease') & (primekg['x_type'] == 'gene/protein')]
     
-    # Standardize: disease as source, gene as target
-    mask = dg['x_type'] == 'gene'
+    # Standardize: disease as source, gene/protein as target
+    mask = dg['x_type'] == 'gene/protein'
     dg.loc[mask, ['x_id', 'x_name', 'x_type', 'y_id', 'y_name', 'y_type']] = \
         dg.loc[mask, ['y_id', 'y_name', 'y_type', 'x_id', 'x_name', 'x_type']].values
     
@@ -59,7 +59,7 @@ def extract_disease_gene_edges(primekg):
                             'y_id': 'gene_id', 'y_name': 'gene_name',
                             'relation': 'association_type'})
     
-    print(f"Disease-gene edges: {len(dg)}")
+    print(f"Disease-gene/protein edges: {len(dg)}")
     return dg
 
 
@@ -68,11 +68,11 @@ def extract_disease_phenotype_edges(primekg):
     if primekg is None:
         return None
     
-    # disease -> phenotype edges
-    dp = primekg[(primekg['x_type'] == 'disease') & (primekg['y_type'] == 'phenotype') |
-                 (primekg['y_type'] == 'disease') & (primekg['x_type'] == 'phenotype')]
+    # disease -> phenotype edges (PrimeKG uses 'effect/phenotype')
+    dp = primekg[(primekg['x_type'] == 'disease') & (primekg['y_type'] == 'effect/phenotype') |
+                 (primekg['y_type'] == 'disease') & (primekg['x_type'] == 'effect/phenotype')]
     
-    mask = dp['x_type'] == 'phenotype'
+    mask = dp['x_type'] == 'effect/phenotype'
     dp.loc[mask, ['x_id', 'x_name', 'x_type', 'y_id', 'y_name', 'y_type']] = \
         dp.loc[mask, ['y_id', 'y_name', 'y_type', 'x_id', 'x_name', 'x_type']].values
     
@@ -89,8 +89,8 @@ def extract_phenotype_info(primekg):
     if primekg is None:
         return None
     
-    pheno_x = primekg[primekg['x_type'] == 'phenotype'][['x_id', 'x_name']].drop_duplicates()
-    pheno_y = primekg[primekg['y_type'] == 'phenotype'][['y_id', 'y_name']].drop_duplicates()
+    pheno_x = primekg[primekg['x_type'] == 'effect/phenotype'][['x_id', 'x_name']].drop_duplicates()
+    pheno_y = primekg[primekg['y_type'] == 'effect/phenotype'][['y_id', 'y_name']].drop_duplicates()
     
     phenotypes = pd.concat([pheno_x.rename(columns={'x_id': 'id', 'x_name': 'name'}),
                             pheno_y.rename(columns={'y_id': 'id', 'y_name': 'name'})]).drop_duplicates()
@@ -109,10 +109,8 @@ def extract_drug_edges(primekg):
                  (primekg['y_type'] == 'drug') & (primekg['x_type'] == 'disease')]
     
     # drug -> gene/protein
-    dg = primekg[(primekg['x_type'] == 'drug') & (primekg['y_type'] == 'gene') |
-                 (primekg['y_type'] == 'drug') & (primekg['x_type'] == 'gene') |
-                 (primekg['x_type'] == 'drug') & (primekg['y_type'] == 'protein') |
-                 (primekg['y_type'] == 'drug') & (primekg['x_type'] == 'protein')]
+    dg = primekg[(primekg['x_type'] == 'drug') & (primekg['y_type'] == 'gene/protein') |
+                 (primekg['y_type'] == 'drug') & (primekg['x_type'] == 'gene/protein')]
     
     return dd, dg
 
