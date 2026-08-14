@@ -44,6 +44,7 @@ data/processed/*.pkl
 data/processed/*.csv
 data/processed/*.gpickle
 data/external/
+data/primekg/
 
 # Models
 models/*.pkl
