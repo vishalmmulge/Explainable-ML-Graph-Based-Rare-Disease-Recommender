@@ -41,6 +41,10 @@ GENES_FILE = RAW_DATA_DIR / "rare_diseases_genes.csv"
 NATURAL_HISTORY_FILE = RAW_DATA_DIR / "rare_diseases_natural_history.csv"
 PREVALENCE_FILE = RAW_DATA_DIR / "rare_diseases_prevalence.csv"
 
+# PrimeKG data
+PRIMEKG_DIR = DATA_DIR / "primekg"
+PRIMEKG_FILE = PRIMEKG_DIR / "kg.csv"
+
 # Processed files
 PROCESSED_DISEASES_FILE = PROCESSED_DATA_DIR / "diseases_processed.csv"
 PROCESSED_FEATURES_FILE = PROCESSED_DATA_DIR / "features.csv"

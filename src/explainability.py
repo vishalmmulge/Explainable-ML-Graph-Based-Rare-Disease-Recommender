@@ -44,14 +44,21 @@ def create_shap_explainer(model, X_background, scaler=None):
     """Create SHAP explainer."""
     print("Creating SHAP explainer...")
     
-    # Scale background data if needed
     if scaler is not None:
         X_background_scaled = scaler.transform(X_background)
     else:
         X_background_scaled = X_background
     
-    # Use LinearExplainer for logistic regression (fast)
-    if hasattr(model, 'coef_'):
+    # Use TreeExplainer for XGBoost with limited classes to avoid memory issues
+    if hasattr(model, 'feature_importances_'):
+        # For multi-class with many classes, use a sample of classes or KernelExplainer
+        try:
+            explainer = shap.TreeExplainer(model)
+        except MemoryError:
+            print("  TreeExplainer memory error, falling back to KernelExplainer...")
+            explainer = shap.KernelExplainer(model.predict_proba, X_background_scaled[:50])
+    elif hasattr(model, 'coef_'):
+        # Linear models (Logistic Regression)
         explainer = shap.LinearExplainer(model, X_background_scaled, feature_perturbation="interventional")
     else:
         # Fallback to KernelExplainer (slower but works for any model)
@@ -67,12 +74,9 @@ def explain_prediction(explainer, X_sample, scaler=None, top_k=10):
     else:
         X_scaled = X_sample.reshape(1, -1)
     
-    # Get SHAP values
     shap_values = explainer.shap_values(X_scaled)
     
-    # For multi-class, shap_values is list of arrays per class
     if isinstance(shap_values, list):
-        # Return SHAP values for all classes
         return shap_values
     else:
         return shap_values
@@ -80,23 +84,18 @@ def explain_prediction(explainer, X_sample, scaler=None, top_k=10):
 
 def get_top_contributing_features(shap_values, feature_names, class_idx, top_k=10):
     """Get top contributing features for a specific class."""
-    # For LinearExplainer with multi-class, shap_values shape is (n_samples, n_features, n_classes)
-    # or (n_classes, n_features)
     if isinstance(shap_values, list):
-        vals = shap_values[class_idx][0]  # First sample, specific class
+        vals = shap_values[class_idx][0]
     elif shap_values.ndim == 3:
-        # Shape: (n_samples, n_features, n_classes)
         vals = shap_values[0, :, class_idx]
     elif shap_values.ndim == 2:
-        # Shape: (n_classes, n_features) or (n_samples, n_features)
         if shap_values.shape[0] == len(feature_names):
             vals = shap_values[:, class_idx]
         else:
-            vals = shap_values[0, :]  # First sample
+            vals = shap_values[0, :]
     else:
         vals = shap_values[0]
     
-    # Get top positive and negative contributions
     top_pos_idx = np.argsort(vals)[::-1][:top_k]
     top_neg_idx = np.argsort(vals)[:top_k]
     
@@ -112,15 +111,11 @@ def generate_global_shap_summary(explainer, X_sample, feature_names, output_path
     
     shap_values = explainer.shap_values(X_sample)
     
-    # Handle different shapes - need 2D array for summary_plot
     if isinstance(shap_values, list):
-        # Multi-class list: stack them
-        sv = np.stack(shap_values, axis=0)  # (n_classes, n_samples, n_features)
-        # Average across classes
-        sv = np.mean(np.abs(sv), axis=0)  # (n_samples, n_features)
+        sv = np.stack(shap_values, axis=0)
+        sv = np.mean(np.abs(sv), axis=0)
     elif shap_values.ndim == 3:
-        # Shape: (n_samples, n_features, n_classes)
-        sv = np.mean(np.abs(shap_values), axis=2)  # (n_samples, n_features)
+        sv = np.mean(np.abs(shap_values), axis=2)
     else:
         sv = shap_values
     
@@ -142,7 +137,6 @@ def generate_class_shap_plot(explainer, X_sample, feature_names, class_idx, labe
     if isinstance(shap_values, list):
         sv = shap_values[class_idx]
     elif shap_values.ndim == 3:
-        # Shape: (n_samples, n_features, n_classes)
         sv = shap_values[:, :, class_idx]
     else:
         sv = shap_values
@@ -162,28 +156,22 @@ def main():
     print("SHAP EXPLAINABILITY")
     print("="*60)
     
-    # Load model and data
     model, scaler, label_encoder = load_model()
     X, y, _, vocab, symptom_features = load_processed_data()
     
-    # Use a small background sample for explainer
-    n_background = min(200, len(X))
+    n_background = min(50, len(X))
     bg_indices = np.random.choice(len(X), n_background, replace=False)
     X_background = X[bg_indices]
     
-    # Create explainer
     explainer = create_shap_explainer(model, X_background, scaler)
     
-    # Test on a sample
     test_idx = 0
     X_test = X[test_idx:test_idx+1]
     
     print(f"Test sample: {label_encoder.classes_[test_idx]}")
     
-    # Get SHAP values
     shap_values = explain_prediction(explainer, X_test[0], scaler)
     
-    # Get top features for predicted class
     pred_class = np.argmax(model.predict_proba(scaler.transform(X_test))[0])
     pos_feats, neg_feats = get_top_contributing_features(
         shap_values, symptom_features, pred_class, top_k=10
@@ -197,8 +185,7 @@ def main():
     for feat, val in neg_feats[:5]:
         print(f"  {feat}: {val:.4f}")
     
-    # Generate summary plot
-    n_sample = min(500, len(X))
+    n_sample = min(100, len(X))
     sample_idx = np.random.choice(len(X), n_sample, replace=False)
     X_sample = X[sample_idx]
     
@@ -210,7 +197,6 @@ def main():
     generate_global_shap_summary(explainer, X_sample_scaled, symptom_features, 
                                 FIGURES_DIR / "shap_summary.png")
     
-    # Generate plot for a few top diseases
     for class_idx in [pred_class]:
         generate_class_shap_plot(explainer, X_sample_scaled, symptom_features, 
                                 class_idx, label_encoder, 

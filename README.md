@@ -18,7 +18,7 @@ This system takes patient symptoms/phenotypes as input and produces:
 ## 🏗️ Architecture
 
 ```
-Symptoms → Multi-hot Encoding → ML Model (Logistic Regression)
+Symptoms → Multi-hot Encoding → ML Model (XGBoost)
                 ↓
         Knowledge Graph (NetworkX)
                 ↓
@@ -37,6 +37,8 @@ Symptoms → Multi-hot Encoding → ML Model (Logistic Regression)
 | Gene Associations | 8,374 | Disease-gene links with association types |
 | Natural History | 7,374 | Age of onset, inheritance patterns |
 | Prevalence | 16,657 | Prevalence classes by geography |
+
+**PrimeKG Integration** (optional): [PrimeKG](https://github.com/mims-harvard/PrimeKG) - Precision Medicine Knowledge Graph with 17,080 diseases, 100K+ nodes, 4M+ relationships
 
 **Knowledge Graph**: 15,954 nodes, 57,951 edges
 - Disease nodes: 11,456
@@ -73,7 +75,7 @@ python scripts/profile_data.py
 # 2. Preprocessing
 python src/preprocessing.py
 
-# 3. Model training
+# 3. Model training (XGBoost)
 python src/models.py
 
 # 4. Knowledge graph construction
@@ -88,7 +90,10 @@ python src/hybrid_model.py
 # 7. SHAP explainability
 python src/explainability.py
 
-# 8. Launch dashboard
+# 8. (Optional) Process PrimeKG data
+python scripts/process_primekg.py
+
+# 9. Launch dashboard
 streamlit run app/app.py
 ```
 
@@ -159,18 +164,18 @@ Since the dataset lacks explicit HPO phenotype annotations, we derive "symptom-l
 Total: **135 features** (96.6% sparse)
 
 ### Machine Learning
-- **Model**: Logistic Regression with L2 regularization (C=1.0)
+- **Model**: XGBoost (gradient boosting) with 50 estimators, max_depth=6
 - **Training**: Disease-level augmented data (3 augmentations with 5% noise)
 - **Split**: Random sample split (70/15/15) with disease stratification
-- **Calibration**: Isotonic regression on validation set
+- **Early Stopping**: 5 rounds on validation set
 
-**Baseline Results** (on 9,164 test samples):
+**Baseline Results** (on test samples):
 | Metric | Score |
 |--------|-------|
-| Top-1 Accuracy | 1.21% |
-| Top-3 Accuracy | 3.09% |
-| Top-5 Accuracy | 5.03% |
-| Macro F1 | 0.41% |
+| Top-1 Accuracy | TBD |
+| Top-3 Accuracy | TBD |
+| Top-5 Accuracy | TBD |
+| Macro F1 | TBD |
 
 ### Knowledge Graph
 Built with NetworkX `MultiDiGraph` preserving edge types:
@@ -194,7 +199,7 @@ HybridScore = α × MLScore + (1-α) × GraphScore
 Evaluated α ∈ {0.0, 0.25, 0.5, 0.75, 1.0}
 
 ### Explainability
-1. **SHAP (ML)**: LinearExplainer for feature contribution to model prediction
+1. **SHAP (ML)**: TreeExplainer (XGBoost) / LinearExplainer (Logistic Regression) for feature contribution
 2. **Graph (Relational)**: Subgraph visualization showing disease-feature connections
 
 ## 📈 Results
@@ -203,6 +208,7 @@ Evaluated α ∈ {0.0, 0.25, 0.5, 0.75, 1.0}
 | Model | Top-1 | Top-3 | Top-5 | Macro F1 |
 |-------|-------|-------|-------|----------|
 | Logistic Regression | 1.21% | 3.09% | 5.03% | 0.41% |
+| XGBoost | TBD | TBD | TBD | TBD |
 
 ### Hybrid Weight Sensitivity
 The optimal α depends on the evaluation metric. Graph-only (α=0) provides complementary signals to ML-only (α=1).
@@ -243,6 +249,7 @@ GRAPH_WEIGHT = 0.5
 ## 🔮 Future Work
 
 - [ ] Integrate HPO phenotype annotations from Orphadata
+- [ ] **Integrate PrimeKG** for expanded disease-gene-phenotype relationships
 - [ ] Implement GNN for graph-based learning (PyTorch Geometric)
 - [ ] Add patient-level evaluation with synthetic cohorts
 - [ ] Improve feature representations (TF-IDF, embeddings)
@@ -257,7 +264,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - **Orphanet/Orphadata** for rare disease data
 - **Kaggle** for dataset hosting
-- **NetworkX**, **scikit-learn**, **SHAP**, **Streamlit** communities
+- **PrimeKG** (mims-harvard) for precision medicine knowledge graph
+- **NetworkX**, **scikit-learn**, **XGBoost**, **SHAP**, **Streamlit** communities
 
 ## 📧 Contact
 
