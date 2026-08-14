@@ -68,6 +68,16 @@ archive/
 archive.zip
 archive_extracted/
 
+# Virtual environment
+projectenv/
+
+# Large data files
+kg.csv
+data/primekg/
+
+# Logs
+streamlit.log
+
 # Environment
 .env
 .env.local
