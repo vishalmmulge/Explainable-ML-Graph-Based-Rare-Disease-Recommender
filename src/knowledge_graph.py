@@ -18,30 +18,63 @@ def load_data():
     natural = pd.read_csv(NATURAL_HISTORY_FILE)
     prevalence = pd.read_csv(PREVALENCE_FILE)
     
+    # Load PrimeKG processed data if available
+    primekg_diseases = None
+    primekg_disease_genes = None
+    primekg_disease_phenotypes = None
+    
+    primekg_processed = PRIMEKG_DIR / "processed"
+    if primekg_processed.exists():
+        try:
+            if (primekg_processed / "diseases.csv").exists():
+                primekg_diseases = pd.read_csv(primekg_processed / "diseases.csv")
+                print(f"  PrimeKG diseases: {len(primekg_diseases)}")
+            if (primekg_processed / "disease_genes.csv").exists():
+                primekg_disease_genes = pd.read_csv(primekg_processed / "disease_genes.csv")
+                print(f"  PrimeKG disease-gene edges: {len(primekg_disease_genes)}")
+            if (primekg_processed / "disease_phenotypes.csv").exists():
+                primekg_disease_phenotypes = pd.read_csv(primekg_processed / "disease_phenotypes.csv")
+                print(f"  PrimeKG disease-phenotype edges: {len(primekg_disease_phenotypes)}")
+        except Exception as e:
+            print(f"  Warning: Could not load PrimeKG data: {e}")
+    
     print(f"  Complete: {len(complete)} diseases")
     print(f"  Genes: {len(genes)} associations")
     print(f"  Natural history: {len(natural)} records")
     print(f"  Prevalence: {len(prevalence)} records")
     
-    return complete, genes, natural, prevalence
+    return complete, genes, natural, prevalence, primekg_diseases, primekg_disease_genes, primekg_disease_phenotypes
 
 
-def build_knowledge_graph(complete, genes, natural, prevalence):
-    """Build a MultiDiGraph with diseases, genes, onset, inheritance, prevalence."""
+def build_knowledge_graph(complete, genes, natural, prevalence, 
+                          primekg_diseases=None, primekg_disease_genes=None, primekg_disease_phenotypes=None):
+    """Build a MultiDiGraph with diseases, genes, onset, inheritance, prevalence, and PrimeKG phenotypes."""
     print("Building knowledge graph...")
     
     G = nx.MultiDiGraph()
     
-    # Add disease nodes
+    # Add disease nodes from Orphadata
+    orpha_codes = set()
     for _, row in complete.iterrows():
         orpha = row['OrphaCode']
+        orpha_codes.add(orpha)
         G.add_node(orpha, 
                    node_type='disease',
                    name=row['Name'],
                    disorder_type=row['DisorderType'],
                    disorder_group=row['DisorderGroup'])
     
-    # Add gene nodes and disease-gene edges
+    # Add PrimeKG disease nodes that aren't in Orphadata (using MONDO IDs)
+    if primekg_diseases is not None:
+        for _, row in primekg_diseases.iterrows():
+            mondo_id = row['id']
+            if mondo_id not in G.nodes:
+                G.add_node(mondo_id, 
+                           node_type='disease',
+                           name=row['name'],
+                           source='primekg')
+    
+    # Add gene nodes and disease-gene edges from Orphadata
     genes_assessed = genes[genes['AssociationStatus'] == 'Assessed']
     for _, row in genes_assessed.iterrows():
         orpha = row['OrphaCode']
@@ -49,18 +82,38 @@ def build_knowledge_graph(complete, genes, natural, prevalence):
         gene_name = row['GeneName']
         assoc_type = row['AssociationType']
         
-        # Add gene node if not exists
         if not G.has_node(gene_symbol):
             G.add_node(gene_symbol, 
                        node_type='gene',
                        name=gene_name)
         
-        # Add edge
         G.add_edge(orpha, gene_symbol, 
                    relation_type='HAS_GENE',
-                   association_type=assoc_type)
+                   association_type=assoc_type,
+                   source='orphadata')
     
-    # Add onset nodes and edges
+    # Add PrimeKG disease-gene/protein edges
+    if primekg_disease_genes is not None:
+        for _, row in primekg_disease_genes.iterrows():
+            disease_id = row['disease_id']
+            gene_id = row['gene_id']
+            gene_name = row['gene_name']
+            assoc_type = row['association_type']
+            
+            # Only add if disease node exists
+            if G.has_node(disease_id):
+                if not G.has_node(gene_id):
+                    G.add_node(gene_id, 
+                               node_type='gene',
+                               name=gene_name,
+                               source='primekg')
+                
+                G.add_edge(disease_id, gene_id, 
+                           relation_type='HAS_GENE',
+                           association_type=assoc_type,
+                           source='primekg')
+    
+    # Add onset nodes and edges from Orphadata
     onset_categories = ['Antenatal', 'Neonatal', 'Infancy', 'Childhood', 
                        'Adolescent', 'Adult', 'Elderly', 'All ages']
     
@@ -131,6 +184,36 @@ def build_knowledge_graph(complete, genes, natural, prevalence):
         dgroup_id = f'group_{row["DisorderGroup"].lower().replace(" ", "_").replace("/", "_")}'
         G.add_edge(orpha, dgroup_id, relation_type='HAS_GROUP')
     
+    # Add PrimeKG HPO phenotype nodes and edges
+    if primekg_disease_phenotypes is not None:
+        print("  Adding PrimeKG HPO phenotypes...")
+        # Filter to positive associations only
+        pos_phenotypes = primekg_disease_phenotypes[
+            primekg_disease_phenotypes['association_type'] == 'disease_phenotype_positive'
+        ]
+        
+        # Add HPO nodes
+        hpo_ids = set()
+        for _, row in pos_phenotypes.iterrows():
+            hpo_id = row['phenotype_id']
+            hpo_name = row['phenotype_name']
+            if hpo_id not in hpo_ids:
+                hpo_ids.add(hpo_id)
+                if not G.has_node(hpo_id):
+                    G.add_node(hpo_id, node_type='phenotype', name=hpo_name, source='primekg')
+        
+        # Add edges (limit to diseases in our graph for performance)
+        added = 0
+        for _, row in pos_phenotypes.iterrows():
+            disease_id = row['disease_id']
+            hpo_id = row['phenotype_id']
+            if G.has_node(disease_id):
+                G.add_edge(disease_id, hpo_id, 
+                           relation_type='HAS_PHENOTYPE',
+                           source='primekg')
+                added += 1
+        print(f"    Added {added} disease-phenotype edges")
+    
     print(f"  Graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
     return G
 
@@ -190,8 +273,9 @@ def main():
     print("KNOWLEDGE GRAPH CONSTRUCTION")
     print("="*60)
     
-    complete, genes, natural, prevalence = load_data()
-    G = build_knowledge_graph(complete, genes, natural, prevalence)
+    complete, genes, natural, prevalence, primekg_diseases, primekg_disease_genes, primekg_disease_phenotypes = load_data()
+    G = build_knowledge_graph(complete, genes, natural, prevalence,
+                              primekg_diseases, primekg_disease_genes, primekg_disease_phenotypes)
     analyze_graph(G)
     save_graph(G)
     

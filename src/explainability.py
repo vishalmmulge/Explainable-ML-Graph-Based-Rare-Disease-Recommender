@@ -23,6 +23,14 @@ def load_model(model_name='best_model'):
     return data['model'], data['scaler'], data['label_encoder']
 
 
+def load_hierarchical_model():
+    """Load hierarchical model components."""
+    model_path = MODEL_DIR / "hierarchical_model.pkl"
+    with open(model_path, 'rb') as f:
+        data = joblib.load(f)
+    return data
+
+
 def load_processed_data():
     """Load processed data."""
     X = np.load(PROCESSED_DATA_DIR / "X.npy")
@@ -51,17 +59,14 @@ def create_shap_explainer(model, X_background, scaler=None):
     
     # Use TreeExplainer for XGBoost with limited classes to avoid memory issues
     if hasattr(model, 'feature_importances_'):
-        # For multi-class with many classes, use a sample of classes or KernelExplainer
         try:
             explainer = shap.TreeExplainer(model)
         except MemoryError:
             print("  TreeExplainer memory error, falling back to KernelExplainer...")
             explainer = shap.KernelExplainer(model.predict_proba, X_background_scaled[:50])
     elif hasattr(model, 'coef_'):
-        # Linear models (Logistic Regression)
         explainer = shap.LinearExplainer(model, X_background_scaled, feature_perturbation="interventional")
     else:
-        # Fallback to KernelExplainer (slower but works for any model)
         explainer = shap.KernelExplainer(model.predict_proba, X_background_scaled[:100])
     
     return explainer
@@ -153,54 +158,77 @@ def generate_class_shap_plot(explainer, X_sample, feature_names, class_idx, labe
 
 def main():
     print("="*60)
-    print("SHAP EXPLAINABILITY")
+    print("SHAP EXPLAINABILITY (Hierarchical Model)")
     print("="*60)
     
-    model, scaler, label_encoder = load_model()
-    X, y, _, vocab, symptom_features = load_processed_data()
+    # Load hierarchical model components for group/type explainability
+    hier_data = load_hierarchical_model()
+    group_model = hier_data['group_model']
+    group_scaler = hier_data['scaler_group']
+    group_le = hier_data['group_le']
+    type_model = hier_data['type_model']
+    type_scaler = hier_data['scaler_type']
+    type_le = hier_data['type_le']
     
+    X, y, disease_le, vocab, symptom_features = load_processed_data()
+    
+    # Use group model for SHAP (3 classes, fast)
+    print("\n--- Group Classifier SHAP ---")
     n_background = min(50, len(X))
     bg_indices = np.random.choice(len(X), n_background, replace=False)
     X_background = X[bg_indices]
     
-    explainer = create_shap_explainer(model, X_background, scaler)
+    group_explainer = create_shap_explainer(group_model, X_background, group_scaler)
     
     test_idx = 0
     X_test = X[test_idx:test_idx+1]
     
-    print(f"Test sample: {label_encoder.classes_[test_idx]}")
+    print(f"Test sample: {disease_le.classes_[test_idx]}")
     
-    shap_values = explain_prediction(explainer, X_test[0], scaler)
+    # Group prediction
+    X_test_group = group_scaler.transform(X_test)
+    group_proba = group_model.predict_proba(X_test_group)
+    group_pred = np.argmax(group_proba, axis=1)[0]
+    print(f"Predicted Group: {group_le.inverse_transform([group_pred])[0]}")
     
-    pred_class = np.argmax(model.predict_proba(scaler.transform(X_test))[0])
+    group_shap = explain_prediction(group_explainer, X_test[0], group_scaler)
     pos_feats, neg_feats = get_top_contributing_features(
-        shap_values, symptom_features, pred_class, top_k=10
+        group_shap, symptom_features, group_pred, top_k=10
     )
     
-    print(f"\nPredicted class: {label_encoder.classes_[pred_class]}")
-    print("Top positive contributors:")
+    print("Top positive contributors (Group):")
     for feat, val in pos_feats[:5]:
         print(f"  {feat}: {val:.4f}")
-    print("Top negative contributors:")
-    for feat, val in neg_feats[:5]:
+    
+    # Type prediction
+    print("\n--- Type Classifier SHAP ---")
+    type_explainer = create_shap_explainer(type_model, X_background, type_scaler)
+    X_test_type = type_scaler.transform(X_test)
+    type_proba = type_model.predict_proba(X_test_type)
+    type_pred = np.argmax(type_proba, axis=1)[0]
+    print(f"Predicted Type: {type_le.inverse_transform([type_pred])[0]}")
+    
+    type_shap = explain_prediction(type_explainer, X_test[0], type_scaler)
+    pos_feats, neg_feats = get_top_contributing_features(
+        type_shap, symptom_features, type_pred, top_k=10
+    )
+    
+    print("Top positive contributors (Type):")
+    for feat, val in pos_feats[:5]:
         print(f"  {feat}: {val:.4f}")
     
+    # Generate summary plots
     n_sample = min(100, len(X))
     sample_idx = np.random.choice(len(X), n_sample, replace=False)
     X_sample = X[sample_idx]
     
-    if scaler is not None:
-        X_sample_scaled = scaler.transform(X_sample)
-    else:
-        X_sample_scaled = X_sample
+    X_sample_group = group_scaler.transform(X_sample)
+    generate_global_shap_summary(group_explainer, X_sample_group, symptom_features, 
+                                FIGURES_DIR / "shap_summary_group.png")
     
-    generate_global_shap_summary(explainer, X_sample_scaled, symptom_features, 
-                                FIGURES_DIR / "shap_summary.png")
-    
-    for class_idx in [pred_class]:
-        generate_class_shap_plot(explainer, X_sample_scaled, symptom_features, 
-                                class_idx, label_encoder, 
-                                FIGURES_DIR / f"shap_class_{class_idx}.png")
+    X_sample_type = type_scaler.transform(X_sample)
+    generate_global_shap_summary(type_explainer, X_sample_type, symptom_features, 
+                                FIGURES_DIR / "shap_summary_type.png")
     
     print("="*60)
     print("SHAP EXPLAINABILITY COMPLETE")
