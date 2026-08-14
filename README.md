@@ -37,28 +37,80 @@ Symptoms → Multi-hot Encoding → Stage 1: Group Classifier (3 classes)
 **Stage 1 (Coarse):** Predicts Disorder Group (3) + Type (11) → ~100% accuracy
 **Stage 2 (Fine):** Predicts specific disease within Group+Type → ~15% Top-1, ~50% Top-5
 
-## 📊 Dataset
+## 📊 Datasets
 
-**Primary Dataset**: [Rare Diseases Orphadata 2026](https://www.kaggle.com/datasets/ahsanneural/rare-diseases-orphadata-2026/data) (Kaggle)
+### Primary Dataset: Rare Diseases Orphadata 2026
+**Source**: [Kaggle - Rare Diseases Orphadata 2026](https://www.kaggle.com/datasets/ahsanneural/rare-diseases-orphadata-2026/data)  
+**Original**: [Orphanet/Orphadata](https://www.orphadata.com/) - Rare disease knowledge base
 
-| Component | Records | Description |
-|-----------|---------|-------------|
-| Diseases | 11,456 | OrphaCode, name, type, group, identifiers |
-| Gene Associations | 8,374 | Disease-gene links with association types |
-| Natural History | 7,374 | Age of onset, inheritance patterns |
-| Prevalence | 16,657 | Prevalence classes by geography |
+| File | Records | Description |
+|------|---------|-------------|
+| `rare_diseases_complete.csv` | 11,456 | Diseases: OrphaCode, name, type, group, identifiers (ICD-10, OMIM, MONDO, UMLS, MeSH, MedDRA, GARD) |
+| `rare_diseases_genes.csv` | 8,374 | Disease-gene associations with association types and status |
+| `rare_diseases_natural_history.csv` | 7,374 | Age of onset, inheritance patterns |
+| `rare_diseases_prevalence.csv` | 16,657 | Prevalence classes by geography (point prevalence, cases/families, incidence) |
 
-**PrimeKG Integration** (optional): [PrimeKG](https://github.com/mims-harvard/PrimeKG) - Precision Medicine Knowledge Graph with 17,080 diseases, 100K+ nodes, 4M+ relationships
+### Knowledge Graph Dataset: PrimeKG (Precision Medicine Knowledge Graph)
+**Source**: [GitHub - mims-harvard/PrimeKG](https://github.com/mims-harvard/PrimeKG)  
+**Publication**: [Nature Scientific Data (2023)](https://www.nature.com/articles/s41597-023-01960-3)  
+**Download**: [Harvard Dataverse - DOI:10.7910/DVN/IXA7BM](https://doi.org/10.7910/DVN/IXA7BM)  
+**Direct Download**: [kg.csv (4M+ edges)](https://dataverse.harvard.edu/api/access/datafile/6180620)
 
-**Knowledge Graph** (Orphadata + PrimeKG): 46,540 nodes, 519,407 edges
-- Disease nodes: 28,536 (Orphadata + PrimeKG MONDO)
-- Gene nodes: 12,150
-- Onset categories: 8
-- Inheritance patterns: 11
-- Prevalence classes: 7
-- Disorder types: 11
-- Disorder groups: 3
-- **HPO Phenotype nodes: 5,814 (PrimeKG)**
+| Statistic | Value |
+|-----------|-------|
+| Diseases | 17,080 |
+| Total Nodes | 100,000+ |
+| Total Edges | 4,050,249 |
+| Edge Types | 29 |
+| Biological Scales | 10 |
+
+**PrimeKG Node Types Used in This Project**:
+| Node Type | Count (in KG) | Description |
+|-----------|---------------|-------------|
+| `disease` | 17,080 | MONDO/OMIM/OrphaCode mapped diseases |
+| `gene/protein` | ~20,000 | NCBI Gene / UniProt |
+| `effect/phenotype` | 15,311 | HPO (Human Phenotype Ontology) terms |
+| `drug` | ~10,000 | DrugBank, DrugCentral |
+| `pathway` | ~2,000 | Reactome |
+| `anatomy` | ~5,000 | UBERON |
+| `biological_process` | ~7,000 | GO Biological Process |
+| `molecular_function` | ~4,000 | GO Molecular Function |
+| `cellular_component` | ~1,000 | GO Cellular Component |
+| `exposure` | ~1,000 | CTD environmental exposures |
+
+**PrimeKG Edge Types Used**:
+| Relation | Display | Count | Source |
+|----------|---------|-------|--------|
+| `disease_protein` | associated with | 160,822 | DisGeNET, OMIM, etc. |
+| `disease_phenotype_positive` | associated with | 300,634 | HPO annotations |
+| `disease_phenotype_negative` | not associated with | 2,386 | HPO negative annotations |
+
+### Integrated Knowledge Graph (Orphadata + PrimeKG)
+Built by merging Orphadata rare diseases with PrimeKG HPO phenotypes and gene associations.
+
+| Metric | Value |
+|--------|-------|
+| **Total Nodes** | 46,540 |
+| **Total Edges** | 519,407 |
+| Disease nodes | 28,536 (Orphadata 11,456 + PrimeKG MONDO 17,080) |
+| Gene/Protein nodes | 12,150 |
+| HPO Phenotype nodes | 5,814 |
+| Onset categories | 8 |
+| Inheritance patterns | 11 |
+| Prevalence classes | 7 |
+| Disorder types | 11 |
+| Disorder groups | 3 |
+
+**Edge Types in Final Graph**:
+| Relation Type | Count | Source |
+|---------------|-------|--------|
+| HAS_GENE | 168,820 | Orphadata + PrimeKG |
+| HAS_PHENOTYPE | 300,634 | PrimeKG (HPO positive) |
+| HAS_ONSET | 11,739 | Orphadata |
+| HAS_INHERITANCE | 7,285 | Orphadata |
+| HAS_PREVALENCE | 8,017 | Orphadata |
+| HAS_TYPE | 11,456 | Orphadata |
+| HAS_GROUP | 11,456 | Orphadata |
 
 ## 🚀 Quick Start
 
