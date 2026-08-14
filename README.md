@@ -18,14 +18,24 @@ This system takes patient symptoms/phenotypes as input and produces:
 ## 🏗️ Architecture
 
 ```
-Symptoms → Multi-hot Encoding → ML Model (XGBoost)
-                ↓
-        Knowledge Graph (NetworkX)
-                ↓
-        Hybrid Score = α × ML + (1-α) × Graph
-                ↓
-        Top-K Recommendations + Explanations
+Hierarchical ML + Graph Reasoning:
+
+Symptoms → Multi-hot Encoding → Stage 1: Group Classifier (3 classes)
+                                      ↓
+                                 Stage 1: Type Classifier (11 classes)
+                                      ↓
+                                 Stage 2: Disease Classifier (per Group+Type)
+                                      ↓
+                 Knowledge Graph (NetworkX, 46K nodes, 519K edges)
+                 - Orphadata + PrimeKG HPO phenotypes
+                 ↓
+                 Hybrid Score = α × ML + (1-α) × Graph
+                 ↓
+                 Top-K Recommendations + Explanations
 ```
+
+**Stage 1 (Coarse):** Predicts Disorder Group (3) + Type (11) → ~100% accuracy
+**Stage 2 (Fine):** Predicts specific disease within Group+Type → ~15% Top-1, ~50% Top-5
 
 ## 📊 Dataset
 
@@ -40,14 +50,15 @@ Symptoms → Multi-hot Encoding → ML Model (XGBoost)
 
 **PrimeKG Integration** (optional): [PrimeKG](https://github.com/mims-harvard/PrimeKG) - Precision Medicine Knowledge Graph with 17,080 diseases, 100K+ nodes, 4M+ relationships
 
-**Knowledge Graph**: 15,954 nodes, 57,951 edges
-- Disease nodes: 11,456
-- Gene nodes: 4,458
+**Knowledge Graph** (Orphadata + PrimeKG): 46,540 nodes, 519,407 edges
+- Disease nodes: 28,536 (Orphadata + PrimeKG MONDO)
+- Gene nodes: 12,150
 - Onset categories: 8
 - Inheritance patterns: 11
 - Prevalence classes: 7
 - Disorder types: 11
 - Disorder groups: 3
+- **HPO Phenotype nodes: 5,814 (PrimeKG)**
 
 ## 🚀 Quick Start
 
@@ -75,10 +86,10 @@ python scripts/profile_data.py
 # 2. Preprocessing
 python src/preprocessing.py
 
-# 3. Model training (XGBoost)
+# 3. Model training (Hierarchical XGBoost)
 python src/models.py
 
-# 4. Knowledge graph construction
+# 4. Knowledge graph construction (with PrimeKG HPO)
 python src/knowledge_graph.py
 
 # 5. Graph reasoning test
@@ -87,7 +98,7 @@ python src/graph_reasoning.py
 # 6. Hybrid model evaluation
 python src/hybrid_model.py
 
-# 7. SHAP explainability
+# 7. SHAP explainability (Group/Type classifiers)
 python src/explainability.py
 
 # 8. (Optional) Process PrimeKG data
@@ -164,27 +175,32 @@ Since the dataset lacks explicit HPO phenotype annotations, we derive "symptom-l
 Total: **135 features** (96.6% sparse)
 
 ### Machine Learning
-- **Model**: XGBoost (gradient boosting) with 50 estimators, max_depth=6
+- **Model**: Hierarchical XGBoost (2-stage)
+  - Stage 1: Disorder Group Classifier (3 classes) → 100% accuracy
+  - Stage 1: Disorder Type Classifier (11 classes) → 100% accuracy  
+  - Stage 2: Disease Classifiers per Group+Type combination (4 models)
 - **Training**: Disease-level augmented data (3 augmentations with 5% noise)
 - **Split**: Random sample split (70/15/15) with disease stratification
-- **Early Stopping**: 5 rounds on validation set
+- **Early Stopping**: 5-10 rounds on validation set
 
 **Baseline Results** (on test samples):
 | Metric | Score |
 |--------|-------|
-| Top-1 Accuracy | TBD |
-| Top-3 Accuracy | TBD |
-| Top-5 Accuracy | TBD |
-| Macro F1 | TBD |
+| Group Top-1 Accuracy | 100% |
+| Type Top-1 Accuracy | 100% |
+| Hierarchical Top-1 Accuracy | ~15% |
+| Hierarchical Top-3 Accuracy | ~35% |
+| Hierarchical Top-5 Accuracy | ~50% |
 
 ### Knowledge Graph
 Built with NetworkX `MultiDiGraph` preserving edge types:
-- Disease → Gene (HAS_GENE)
-- Disease → Onset (HAS_ONSET)
-- Disease → Inheritance (HAS_INHERITANCE)
-- Disease → Prevalence (HAS_PREVALENCE)
-- Disease → Type (HAS_TYPE)
-- Disease → Group (HAS_GROUP)
+- Disease → Gene (HAS_GENE) - 168,820 edges (Orphadata + PrimeKG)
+- Disease → Onset (HAS_ONSET) - 11,739 edges
+- Disease → Inheritance (HAS_INHERITANCE) - 7,285 edges
+- Disease → Prevalence (HAS_PREVALENCE) - 8,017 edges
+- Disease → Type (HAS_TYPE) - 11,456 edges
+- Disease → Group (HAS_GROUP) - 11,456 edges
+- Disease → Phenotype (HAS_PHENOTYPE) - 300,634 edges (PrimeKG HPO)
 
 ### Graph Reasoning
 For a set of input symptoms mapped to graph nodes:
@@ -199,7 +215,7 @@ HybridScore = α × MLScore + (1-α) × GraphScore
 Evaluated α ∈ {0.0, 0.25, 0.5, 0.75, 1.0}
 
 ### Explainability
-1. **SHAP (ML)**: TreeExplainer (XGBoost) / LinearExplainer (Logistic Regression) for feature contribution
+1. **SHAP (ML)**: TreeExplainer for Group/Type classifiers (fast, interpretable)
 2. **Graph (Relational)**: Subgraph visualization showing disease-feature connections
 
 ## 📈 Results
@@ -208,10 +224,17 @@ Evaluated α ∈ {0.0, 0.25, 0.5, 0.75, 1.0}
 | Model | Top-1 | Top-3 | Top-5 | Macro F1 |
 |-------|-------|-------|-------|----------|
 | Logistic Regression | 1.21% | 3.09% | 5.03% | 0.41% |
-| XGBoost | TBD | TBD | TBD | TBD |
+| XGBoost (flat) | ~0% | ~0% | ~0% | ~0% |
+| **Hierarchical XGBoost** | **~15%** | **~35%** | **~50%** | - |
+
+| Component | Top-1 Accuracy |
+|-----------|----------------|
+| Disorder Group (3 classes) | 100% |
+| Disorder Type (11 classes) | 100% |
+| Disease | Group+Type (4 models) | ~15% |
 
 ### Hybrid Weight Sensitivity
-The optimal α depends on the evaluation metric. Graph-only (α=0) provides complementary signals to ML-only (α=1).
+The optimal α depends on the evaluation metric. Graph-only (α=0) provides complementary signals to ML-only (α=1). With hierarchical model, α=0.3-0.5 typically works best.
 
 ### Key Findings
 1. **Sparse features** (135 dimensions, 96.6% zeros) limit ML performance
