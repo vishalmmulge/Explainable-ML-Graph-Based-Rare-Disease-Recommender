@@ -10,6 +10,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from src.config import *
 
 from src.graph_reasoning import load_graph, compute_graph_scores, map_symptoms_to_graph_nodes, get_top_k_diseases
+from src.models import HierarchicalModelWrapper
 
 
 def load_model(model_name='best_model'):
