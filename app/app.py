@@ -94,10 +94,10 @@ def main():
 def show_home_page():
     st.title("🧬 Rare Disease Recommendation System")
     st.markdown("""
-    ### Explainable Graph-Based Rare Disease Recommendation Using Symptom-Phenotype Mapping
+    ### Hierarchical ML + Knowledge Graph + Explainable AI for Rare Disease Diagnosis
     
-    This research prototype combines **machine learning** with **biomedical knowledge graph reasoning** 
-    to recommend rare diseases based on patient symptoms/phenotypes.
+    This research prototype combines **hierarchical XGBoost classification** with **biomedical knowledge graph reasoning** 
+    (Orphadata + PrimeKG HPO phenotypes) to recommend rare diseases based on patient symptoms/phenotypes.
     """)
     
     col1, col2 = st.columns(2)
@@ -107,47 +107,64 @@ def show_home_page():
         st.markdown("""
         - **Top-K Disease Recommendations**: Rank rare diseases by relevance to input symptoms
         - **Calibrated Confidence Scores**: Probability estimates for each recommendation
-        - **Symptom-Level Explanations**: SHAP-based feature importance
-        - **Graph-Based Evidence**: Knowledge graph relationships between symptoms, diseases, and genes
-        - **Hybrid Approach**: Combine ML predictions with graph reasoning
+        - **Hierarchical Classification**: Group → Type → Disease (100% / 100% / ~15% Top-1)
+        - **Graph-Based Evidence**: Knowledge graph with 300K+ HPO phenotype edges
+        - **Hybrid Approach**: Combine ML predictions with graph reasoning (α-weighted)
+        - **Dual Explanations**: SHAP feature importance + Graph subgraph visualization
         """)
     
     with col2:
-        st.subheader("📊 Dataset")
+        st.subheader("📊 Dataset & Knowledge Graph")
         st.markdown("""
-        - **Source**: Orphanet/Orphadata rare disease information (Kaggle)
-        - **Diseases**: 11,456 rare diseases
+        **Orphadata (Primary)**:
+        - **Diseases**: 11,456 rare diseases (OrphaCode)
         - **Gene Associations**: 8,374 disease-gene links
         - **Natural History**: 7,374 records (onset, inheritance)
         - **Prevalence**: 16,657 prevalence records
-        - **Knowledge Graph**: 15,954 nodes, 57,951 edges
+        
+        **PrimeKG (Integrated)**:
+        - **HPO Phenotypes**: 5,814 terms, 300,634 disease-phenotype edges
+        - **Gene/Protein**: 12,150 nodes, 168,820 disease-gene edges
+        - **Total Graph**: 46,540 nodes, 519,407 edges
+        
+        **Hierarchical Model Performance**:
+        - **Stage 1 Group (3 classes)**: 100% accuracy
+        - **Stage 1 Type (11 classes)**: 100% accuracy  
+        - **Stage 2 Disease (per Group+Type)**: ~15% Top-1, ~50% Top-5
         """)
     
     st.subheader("🔬 Research Motivation")
     st.markdown("""
     Rare disease diagnosis is challenging due to:
-    - Overlapping symptoms across diseases
-    - Limited training examples per disease
+    - Overlapping symptoms across 10,000+ diseases
+    - Limited training examples per disease (1 sample each)
     - Conventional ML treats symptoms as independent features
-    - Black-box predictions lack interpretability
+    - Black-box predictions lack clinical interpretability
     
-    **Our Approach**: Hybrid ML + Knowledge Graph + Explainable AI
+    **Our Approach**: **Hierarchical ML** (coarse-to-fine) + **PrimeKG-Enhanced Knowledge Graph** + **Explainable AI** (SHAP + Graph)
     """)
     
     st.subheader("🏗️ Architecture")
     st.markdown("""
     ```
-    Symptoms → Multi-hot Encoding → ML Model (Logistic Regression)
-                    ↓
-            Knowledge Graph (NetworkX)
-                    ↓
-            Hybrid Score = α × ML + (1-α) × Graph
-                    ↓
-            Top-K Recommendations + Explanations
+    Hierarchical ML Pipeline + Graph Reasoning:
+    
+    Symptoms → Multi-hot Encoding → Stage 1: Group Classifier (3 classes, 100%)
+                                     ↓
+                                Stage 1: Type Classifier (11 classes, 100%)
+                                     ↓
+                                Stage 2: Disease Classifiers (per Group+Type)
+                                     ↓
+                    Knowledge Graph (NetworkX, 46K nodes, 519K edges)
+                    - Orphadata + PrimeKG HPO phenotypes
+                                     ↓
+                    Hybrid Score = α × ML + (1-α) × Graph
+                                     ↓
+                    Top-K Recommendations + Dual Explanations
     ```
     """)
     
-    st.info("👈 Use the sidebar to navigate to different pages.")
+    st.info("👈 Use the sidebar to navigate: **Disease Recommendation** for predictions, **Explainability** for SHAP/Graph analysis, **Knowledge Graph** for graph exploration, **Model Evaluation** for metrics.")
 
 
 def show_recommendation_page(model, scaler, label_encoder, vocab, symptom_features, G, merged):
@@ -331,50 +348,145 @@ def show_explainability_page(model, scaler, label_encoder, vocab, symptom_featur
                 X_user = np.zeros(len(symptom_features))
                 X_user[selected_indices] = 1
                 X_user = X_user.reshape(1, -1)
+            
+            if scaler is not None:
+                X_scaled = scaler.transform(X_user)
+            else:
+                X_scaled = X_user
+            
+            # Get feature importance based on model type
+            st.markdown("**Feature Importance Analysis**")
+            
+            # Check if it's the hierarchical model wrapper
+            is_hierarchical = hasattr(model, 'group_model') and hasattr(model, 'type_model')
+            
+            if is_hierarchical:
+                # Hierarchical XGBoost model - show group/type feature importance
+                st.info("📊 **Hierarchical Model**: Showing Stage 1 (Group & Type) feature importance. Disease-level uses separate models per Group+Type.")
                 
-                if scaler is not None:
-                    X_scaled = scaler.transform(X_user)
-                else:
-                    X_scaled = X_user
+                # Get group prediction and feature importance
+                hier_data = joblib.load(MODEL_DIR / "hierarchical_model.pkl")
+                group_model = hier_data['group_model']
+                group_scaler = hier_data['scaler_group']
+                group_le = hier_data['group_le']
+                type_model = hier_data['type_model']
+                type_scaler = hier_data['scaler_type']
+                type_le = hier_data['type_le']
                 
-                # Get SHAP values using the model's coef_ (for linear model)
-                if hasattr(model, 'coef_'):
-                    # For logistic regression, SHAP values ≈ coef_ * feature_value
-                    coef = model.coef_
-                    pred_class_idx = np.where(label_encoder.classes_ == orpha_code)[0][0]
+                # Group features
+                X_group_scaled = group_scaler.transform(X_user)
+                group_proba = group_model.predict_proba(X_group_scaled)
+                group_pred = np.argmax(group_proba, axis=1)[0]
+                group_name = group_le.inverse_transform([group_pred])[0]
+                
+                # Type features
+                X_type_scaled = type_scaler.transform(X_user)
+                type_proba = type_model.predict_proba(X_type_scaled)
+                type_pred = np.argmax(type_proba, axis=1)[0]
+                type_name = type_le.inverse_transform([type_pred])[0]
+                
+                st.write(f"**Predicted Group**: {group_name} | **Predicted Type**: {type_name}")
+                
+                # Feature importance for group model
+                group_importance = group_model.feature_importances_
+                group_feat_imp = [(symptom_features[i], float(group_importance[i])) for i in range(len(symptom_features)) if X_user[0, i] > 0]
+                group_feat_imp.sort(key=lambda x: abs(x[1]), reverse=True)
+                
+                if group_feat_imp:
+                    group_df = pd.DataFrame(group_feat_imp, columns=['Feature', 'Importance'])
+                    group_df['Feature'] = group_df['Feature'].apply(get_feature_display_name)
+                    group_df['Direction'] = group_df['Importance'].apply(lambda x: 'Supports' if x > 0 else 'Reduces')
                     
-                    if coef.ndim > 1:
-                        shap_vals = coef[pred_class_idx] * X_user[0]
-                    else:
-                        shap_vals = coef * X_user[0]
-                    
-                    # Get top contributing features
-                    feature_importance = []
-                    for i, feat in enumerate(symptom_features):
-                        if X_user[0, i] > 0:
-                            feature_importance.append({
-                                'Feature': get_feature_display_name(feat),
-                                'SHAP Value': float(shap_vals[i]),
-                                'Direction': 'Supports' if shap_vals[i] > 0 else 'Reduces'
-                            })
-                    
-                    importance_df = pd.DataFrame(feature_importance).sort_values('SHAP Value', key=abs, ascending=False)
-                    
-                    # Plot
                     fig = px.bar(
-                        importance_df.head(15),
-                        x='SHAP Value',
-                        y='Feature',
-                        color='Direction',
+                        group_df.head(15),
+                        x='Importance', y='Feature', color='Direction',
                         color_discrete_map={'Supports': '#2ca02c', 'Reduces': '#d62728'},
                         orientation='h',
-                        title='Feature Contributions (SHAP Values)'
+                        title=f'Group Classifier Feature Importance (Predicted: {group_name})'
+                    )
+                    fig.update_layout(height=400, yaxis={'categoryorder': 'total ascending'})
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Feature importance for type model
+                type_importance = type_model.feature_importances_
+                type_feat_imp = [(symptom_features[i], float(type_importance[i])) for i in range(len(symptom_features)) if X_user[0, i] > 0]
+                type_feat_imp.sort(key=lambda x: abs(x[1]), reverse=True)
+                
+                if type_feat_imp:
+                    type_df = pd.DataFrame(type_feat_imp, columns=['Feature', 'Importance'])
+                    type_df['Feature'] = type_df['Feature'].apply(get_feature_display_name)
+                    type_df['Direction'] = type_df['Importance'].apply(lambda x: 'Supports' if x > 0 else 'Reduces')
+                    
+                    fig = px.bar(
+                        type_df.head(15),
+                        x='Importance', y='Feature', color='Direction',
+                        color_discrete_map={'Supports': '#2ca02c', 'Reduces': '#d62728'},
+                        orientation='h',
+                        title=f'Type Classifier Feature Importance (Predicted: {type_name})'
+                    )
+                    fig.update_layout(height=400, yaxis={'categoryorder': 'total ascending'})
+                    st.plotly_chart(fig, use_container_width=True)
+            
+            elif hasattr(model, 'feature_importances_'):
+                # XGBoost model
+                importance = model.feature_importances_
+                feat_imp = [(symptom_features[i], float(importance[i])) for i in range(len(symptom_features)) if X_user[0, i] > 0]
+                feat_imp.sort(key=lambda x: abs(x[1]), reverse=True)
+                
+                if feat_imp:
+                    imp_df = pd.DataFrame(feat_imp, columns=['Feature', 'Importance'])
+                    imp_df['Feature'] = imp_df['Feature'].apply(get_feature_display_name)
+                    imp_df['Direction'] = imp_df['Importance'].apply(lambda x: 'Supports' if x > 0 else 'Reduces')
+                    
+                    fig = px.bar(
+                        imp_df.head(15),
+                        x='Importance', y='Feature', color='Direction',
+                        color_discrete_map={'Supports': '#2ca02c', 'Reduces': '#d62728'},
+                        orientation='h',
+                        title='Feature Importance (XGBoost)'
                     )
                     fig.update_layout(height=500, yaxis={'categoryorder': 'total ascending'})
                     st.plotly_chart(fig, use_container_width=True)
                     
-                    # Table
-                    st.dataframe(importance_df, use_container_width=True)
+                    st.dataframe(imp_df, use_container_width=True)
+            
+            elif hasattr(model, 'coef_'):
+                # For logistic regression, SHAP values ≈ coef_ * feature_value
+                coef = model.coef_
+                pred_class_idx = np.where(label_encoder.classes_ == orpha_code)[0][0]
+                
+                if coef.ndim > 1:
+                    shap_vals = coef[pred_class_idx] * X_user[0]
+                else:
+                    shap_vals = coef * X_user[0]
+                
+                # Get top contributing features
+                feature_importance = []
+                for i, feat in enumerate(symptom_features):
+                    if X_user[0, i] > 0:
+                        feature_importance.append({
+                            'Feature': get_feature_display_name(feat),
+                            'SHAP Value': float(shap_vals[i]),
+                            'Direction': 'Supports' if shap_vals[i] > 0 else 'Reduces'
+                        })
+                
+                importance_df = pd.DataFrame(feature_importance).sort_values('SHAP Value', key=abs, ascending=False)
+                
+                # Plot
+                fig = px.bar(
+                    importance_df.head(15),
+                    x='SHAP Value',
+                    y='Feature',
+                    color='Direction',
+                    color_discrete_map={'Supports': '#2ca02c', 'Reduces': '#d62728'},
+                    orientation='h',
+                    title='Feature Contributions (SHAP Values)'
+                )
+                fig.update_layout(height=500, yaxis={'categoryorder': 'total ascending'})
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Table
+                st.dataframe(importance_df, use_container_width=True)
                 
                 # Graph Explanation
                 st.markdown("### 🕸️ Graph Explanation")
