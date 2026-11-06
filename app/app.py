@@ -92,78 +92,292 @@ def main():
 
 
 def show_home_page():
-    st.title("🧬 Rare Disease Recommendation System")
+    # --- Custom animated styling ---
     st.markdown("""
-    ### Hierarchical ML + Knowledge Graph + Explainable AI for Rare Disease Diagnosis
-    
-    This research prototype combines **hierarchical XGBoost classification** with **biomedical knowledge graph reasoning** 
-    (Orphadata + PrimeKG HPO phenotypes) to recommend rare diseases based on patient symptoms/phenotypes.
-    """)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🎯 Project Objectives")
-        st.markdown("""
-        - **Top-K Disease Recommendations**: Rank rare diseases by relevance to input symptoms
-        - **Calibrated Confidence Scores**: Probability estimates for each recommendation
-        - **Hierarchical Classification**: Group → Type → Disease (100% / 100% / ~15% Top-1)
-        - **Graph-Based Evidence**: Knowledge graph with 300K+ HPO phenotype edges
-        - **Hybrid Approach**: Combine ML predictions with graph reasoning (α-weighted)
-        - **Dual Explanations**: SHAP feature importance + Graph subgraph visualization
-        """)
-    
-    with col2:
-        st.subheader("📊 Dataset & Knowledge Graph")
-        st.markdown("""
-        **Orphadata (Primary)**:
-        - **Diseases**: 11,456 rare diseases (OrphaCode)
-        - **Gene Associations**: 8,374 disease-gene links
-        - **Natural History**: 7,374 records (onset, inheritance)
-        - **Prevalence**: 16,657 prevalence records
-        
-        **PrimeKG (Integrated)**:
-        - **HPO Phenotypes**: 5,814 terms, 300,634 disease-phenotype edges
-        - **Gene/Protein**: 12,150 nodes, 168,820 disease-gene edges
-        - **Total Graph**: 46,540 nodes, 519,407 edges
-        
-        **Hierarchical Model Performance**:
-        - **Stage 1 Group (3 classes)**: 100% accuracy
-        - **Stage 1 Type (11 classes)**: 100% accuracy  
-        - **Stage 2 Disease (per Group+Type)**: ~15% Top-1, ~50% Top-5
-        """)
-    
-    st.subheader("🔬 Research Motivation")
+    <style>
+    .home-hero {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+        border: 1px solid #334155;
+        border-radius: 16px;
+        padding: 2rem 2.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 10px 40px -10px rgba(0,0,0,0.4);
+    }
+    .home-hero h1 {
+        font-size: 2.6rem;
+        font-weight: 800;
+        margin: 0 0 0.5rem 0;
+        background: linear-gradient(90deg, #38bdf8, #818cf8, #a78bfa);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: heroFadeIn 1.2s ease-out both;
+    }
+    .home-hero p {
+        color: #cbd5e1;
+        font-size: 1.1rem;
+        margin: 0;
+        animation: heroFadeIn 1.4s ease-out both;
+    }
+    @keyframes heroFadeIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .metric-card {
+        background: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+        height: 150px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: flex-start;
+        transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+        animation: cardFadeIn 0.8s ease-out both;
+    }
+    .metric-card:hover {
+        transform: translateY(-4px);
+        border-color: #38bdf8;
+        box-shadow: 0 12px 40px -12px rgba(56, 189, 248, 0.15);
+    }
+    .metric-card .value {
+        font-size: 1.9rem;
+        font-weight: 800;
+        color: #38bdf8;
+        line-height: 1;
+    }
+    .metric-card .label {
+        font-size: 0.85rem;
+        color: #94a3b8;
+        margin-top: 0.5rem;
+        font-weight: 600;
+    }
+    .metric-card .sub {
+        font-size: 0.75rem;
+        color: #64748b;
+        margin-top: 0.2rem;
+    }
+    @keyframes cardFadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .term-block {
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+        font-family: 'Menlo', 'Consolas', 'monospace';
+        font-size: 0.85rem;
+        line-height: 1.55;
+        color: #c9d1d9;
+        overflow-x: auto;
+        margin-top: 1rem;
+        animation: termFadeIn 1s ease-out both;
+        box-shadow: 0 8px 32px -12px rgba(0,0,0,0.5);
+    }
+    .term-prompt { color: #58a6ff; font-weight: 700; margin-right: 0.4rem; }
+    .term-cmd { color: #79c0ff; }
+    .term-cursor {
+        display: inline-block;
+        width: 8px;
+        height: 1em;
+        background: #58a6ff;
+        animation: blink 1s step-end infinite;
+        vertical-align: middle;
+        margin-left: 2px;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+    @keyframes termFadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .arch-desc {
+        background: #f8fafc;
+        border-left: 4px solid #38bdf8;
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin-top: 1rem;
+        animation: descFadeIn 1s ease-out both;
+        color: #0f172a;
+    }
+    .arch-desc b,
+    .arch-desc strong {
+        color: #0f172a !important;
+    }
+    .arch-desc .stage-label {
+        color: #475569;
+        font-weight: 600;
+    }
+    .arch-desc .stage-desc {
+        color: #334155;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin-top: 0.25rem;
+    }
+    @keyframes descFadeIn {
+        from { opacity: 0; transform: translateX(-8px); }
+        to { opacity: 1; transform: translateX(0); }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # --- Animated hero section ---
     st.markdown("""
-    Rare disease diagnosis is challenging due to:
-    - Overlapping symptoms across 10,000+ diseases
-    - Limited training examples per disease (1 sample each)
-    - Conventional ML treats symptoms as independent features
-    - Black-box predictions lack clinical interpretability
-    
-    **Our Approach**: **Hierarchical ML** (coarse-to-fine) + **PrimeKG-Enhanced Knowledge Graph** + **Explainable AI** (SHAP + Graph)
-    """)
-    
-    st.subheader("🏗️ Architecture")
-    st.markdown("""
-    ```
-    Hierarchical ML Pipeline + Graph Reasoning:
-    
-    Symptoms → Multi-hot Encoding → Stage 1: Group Classifier (3 classes, 100%)
-                                     ↓
-                                Stage 1: Type Classifier (11 classes, 100%)
-                                     ↓
-                                Stage 2: Disease Classifiers (per Group+Type)
-                                     ↓
-                    Knowledge Graph (NetworkX, 46K nodes, 519K edges)
-                    - Orphadata + PrimeKG HPO phenotypes
-                                     ↓
-                    Hybrid Score = α × ML + (1-α) × Graph
-                                     ↓
-                    Top-K Recommendations + Dual Explanations
-    ```
-    """)
-    
+    <div class="home-hero">
+        <h1>🧬 Rare Disease Recommendation System</h1>
+        <p>Hierarchical ML + Knowledge Graph + Explainable AI for Rare Disease Diagnosis</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # --- Interactive metric cards ---
+    c1, c2, c3, c4 = st.columns(4)
+    cards = [
+        ("11,456", "Rare Diseases", "Orphadata 2026"),
+        ("519K", "Graph Edges", "Orphadata + PrimeKG HPO"),
+        ("100%", "Group Accuracy", "Stage 1 Classifier"),
+        ("~50%", "Top-5 Accuracy", "Stage 2 Disease"),
+    ]
+    for col, (value, label, sub) in zip([c1, c2, c3, c4], cards):
+        with col:
+            st.markdown(f"""
+            <div class="metric-card">
+                <div class="value">{value}</div>
+                <div class="label">{label}</div>
+                <div class="sub">{sub}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # --- Interactive architecture diagram ---
+    st.subheader("🏗️ System Architecture")
+    st.markdown("Select a pipeline stage below to explore its role — the diagram highlights the active stage.")
+
+    stages = [
+        ("Symptoms", "Input", "Patient symptoms/phenotypes encoded as a multi-hot feature vector (135 features: genes, onset, inheritance, type, group, prevalence).", "#38bdf8"),
+        ("Group Classifier", "Stage 1 • 3 classes", "Hierarchical XGBoost predicts the Disorder Group with 100% accuracy.", "#22d3ee"),
+        ("Type Classifier", "Stage 1 • 11 classes", "Predicts the Disorder Type within the group with 100% accuracy.", "#06b6d4"),
+        ("Disease Classifiers", "Stage 2 • per Group+Type", "Fine-grained disease prediction per Group+Type (~15% Top-1, ~50% Top-5).", "#0891b2"),
+        ("Knowledge Graph", "Graph Reasoning", "NetworkX MultiDiGraph: 46,540 nodes, 519,407 edges (Orphadata + PrimeKG HPO phenotypes).", "#0f766e"),
+        ("Hybrid Score", "α × ML + (1−α) × Graph", "Combines ML and graph evidence with tunable weight α (default 0.5).", "#115e59"),
+        ("Top-K Recommendations", "Output", "Ranked rare disease recommendations with confidence + dual explanations (SHAP + Graph).", "#14532d"),
+    ]
+
+    stage_names = [s[0] for s in stages]
+    if "home_active_stage" not in st.session_state:
+        st.session_state.home_active_stage = "Symptoms"
+
+    selected = st.segmented_control("Architecture Stage", stage_names, default="Symptoms", key="home_arch_control")
+    if selected:
+        st.session_state.home_active_stage = selected
+    active = st.session_state.home_active_stage
+
+    # Build Plotly architecture figure
+    fig = go.Figure()
+
+    # Wider spacing so labels sit above nodes and arrows don't collide with text
+    pos = {
+        "Symptoms": (0, 0),
+        "Group Classifier": (1.25, 1),
+        "Type Classifier": (2.5, 1),
+        "Disease Classifiers": (3.75, 1),
+        "Knowledge Graph": (5, 0),
+        "Hybrid Score": (6.25, 0),
+        "Top-K Recommendations": (7.5, 0),
+    }
+
+    order = ["Symptoms", "Group Classifier", "Type Classifier",
+             "Disease Classifiers", "Knowledge Graph", "Hybrid Score", "Top-K Recommendations"]
+    for i in range(len(order) - 1):
+        x0, y0 = pos[order[i]]
+        x1, y1 = pos[order[i + 1]]
+        fig.add_annotation(
+            x=x1, y=y1, ax=x0, ay=y0,
+            xref='x', yref='y', axref='x', ayref='y',
+            showarrow=True,
+            arrowhead=3, arrowsize=1.6, arrowwidth=2.5,
+            arrowcolor="#334155",
+            standoff=30,   # keep arrow tip away from node edge
+        )
+
+    for name, label, desc, color in stages:
+        x, y = pos[name]
+        is_active = (name == active)
+        size = 44 if is_active else 30
+        line_width = 4 if is_active else 2
+        line_color = color if is_active else "#475569"
+        fill_color = color if is_active else "#0f172a"
+        fig.add_trace(go.Scatter(
+            x=[x], y=[y],
+            mode="markers+text",
+            marker=dict(
+                size=size,
+                color=fill_color,
+                line=dict(width=line_width, color=line_color),
+                symbol="circle",
+            ),
+            text=[name],
+            textposition="top center",   # label floats above the node
+            textfont=dict(
+                color="white" if is_active else "#94a3b8",
+                size=10.5 if is_active else 9,
+                family="Arial Black",
+            ),
+            hoverinfo="text",
+            hovertext=f"<b>{name}</b><br>{label}<br>{desc}",
+            showlegend=False,
+        ))
+
+    fig.update_layout(
+        title="Interactive Architecture Pipeline",
+        xaxis=dict(visible=False, range=[-0.9, 8.4]),
+        yaxis=dict(visible=False, range=[-1.9, 1.5]),
+        plot_bgcolor="#0f172a",
+        paper_bgcolor="#0f172a",
+        font=dict(color="#cbd5e1"),
+        margin=dict(l=10, r=10, t=55, b=10),
+        height=430,
+        hovermode="closest",
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    active_info = next(s for s in stages if s[0] == active)
+    st.markdown(f"""
+    <div class="arch-desc">
+        <b style="color:{active_info[3]};">▸ {active_info[0]}</b>
+        <span class="stage-label"> — {active_info[1]}</span>
+        <div class="stage-desc">{active_info[2]}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # --- Terminal commands section ---
+    st.subheader("💻 Run in Terminal")
+    st.markdown("Setup and run the project from your terminal (PowerShell):")
+
+    term = (
+        "# 1. Create and activate virtual environment\n"
+        "$cmd python -m venv projectenv$cursor\n"
+        "$cmd .\\projectenv\\Scripts\\Activate.ps1$cursor\n\n"
+        "# 2. Install dependencies\n"
+        "$cmd pip install -r requirements.txt$cursor\n\n"
+        "# 3. Run the pipeline\n"
+        "$cmd python scripts/profile_data.py$cursor\n"
+        "$cmd python src/preprocessing.py$cursor\n"
+        "$cmd python src/models.py$cursor\n"
+        "$cmd python src/knowledge_graph.py$cursor\n"
+        "$cmd python src/graph_reasoning.py$cursor\n"
+        "$cmd python src/hybrid_model.py$cursor\n"
+        "$cmd python src/explainability.py$cursor\n\n"
+        "# 4. Launch the dashboard\n"
+        "$cmd streamlit run app/app.py$cursor"
+    )
+    term_html = term.replace("$cmd", '<span class="term-prompt">PS C:\\> </span><span class="term-cmd">')
+    term_html = term_html.replace("$cursor", '</span><span class="term-cursor"></span>')
+    st.markdown(f'<div class="term-block">{term_html}</div>', unsafe_allow_html=True)
+
     st.info("👈 Use the sidebar to navigate: **Disease Recommendation** for predictions, **Explainability** for SHAP/Graph analysis, **Knowledge Graph** for graph exploration, **Model Evaluation** for metrics.")
 
 
