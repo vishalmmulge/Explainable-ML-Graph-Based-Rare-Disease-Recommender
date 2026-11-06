@@ -26,12 +26,12 @@ Symptoms → Multi-hot Encoding → Stage 1: Group Classifier (3 classes)
                                       ↓
                                  Stage 2: Disease Classifier (per Group+Type)
                                       ↓
-                 Knowledge Graph (NetworkX, 46K nodes, 519K edges)
-                 - Orphadata + PrimeKG HPO phenotypes
-                 ↓
-                 Hybrid Score = α × ML + (1-α) × Graph
-                 ↓
-                 Top-K Recommendations + Explanations
+                                 Knowledge Graph (NetworkX, 46K nodes, 519K edges)
+                                 - Orphadata + PrimeKG HPO phenotypes
+                                      ↓
+                                 Hybrid Score = α × ML + (1-α) × Graph
+                                      ↓
+                                 Top-K Recommendations + Explanations
 ```
 
 **Stage 1 (Coarse):** Predicts Disorder Group (3) + Type (11) → ~100% accuracy
